@@ -178,6 +178,32 @@ The two are stored independently. The favorites list is browser-side helper data
 </details>
 
 <details>
+<summary><b>Troubleshooting "Module not active"</b></summary>
+
+The picker page and the module are separated by one hop through `gs-loc.apple.com`, so the same red banner can mean four unrelated things. Tap **Diagnose** in the "Active coordinates" card (a failed save fills it in automatically) and the page names the exact case:
+
+| Diagnosis | What it really means | What to check |
+|---|---|---|
+| Request never completed (`TypeError: Failed to fetch`) | The browser could not reach `gs-loc.apple.com` at all | This traffic is not going through the proxy (proxy tool off, or the page opened in a desktop browser without the module); the MITM certificate is not fully trusted; the engine reply is missing CORS headers |
+| Request reached Apple (`HTTP 404`) | MITM never intercepted this hostname | The module script failed to download (`raw.githubusercontent.com` is unreachable — by far the most common cause); the hostname is not in the MITM list; the module is off |
+| Module is active, nothing saved yet | The script answered normally, you simply never saved | Everything is fine, tap "Save to Device" |
+| Module is active, but this write failed | The script intercepted the request but could not persist it | Read the engine script log; writing `wloc_settings` is being blocked |
+
+**Fastest self-check**: copy the check link from the diagnosis bar into the address bar (same-origin access is not subject to CORS).
+
+```
+https://gs-loc.apple.com/wloc-settings/save?action=query
+```
+
+- JSON comes back (`{"success":...}`) → the module path works; the page error can only be CORS headers or certificate trust
+- `Not Found` comes back → the request hit the real Apple server, MITM is not in play. Check whether the module script actually downloaded (re-import the module, or point `script-path` at `dist/wloc-settings.js` yourself)
+- The page will not open / certificate warning → this traffic bypasses the proxy, or the MITM certificate is not trusted
+
+> If the module is on your iPhone, open the picker page in that phone's browser. Loading the same URL on a Mac or Windows browser will always fail this hop.
+
+</details>
+
+<details>
 <summary><b>Rebuilding dist (for developers)</b></summary>
 
 The `dist/wloc.js` and `dist/wloc-settings.js` files that the modules load are build artifacts; the source lives in `src/`:

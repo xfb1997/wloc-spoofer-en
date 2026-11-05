@@ -178,6 +178,32 @@ https://raw.githubusercontent.com/xfb1997/wloc-spoofer-en/refs/heads/main/module
 </details>
 
 <details>
+<summary><b>排查「模块未生效」提示</b></summary>
+
+选点页面和模块之间隔着 `gs-loc.apple.com` 这一跳，同一个红条可能对应四种完全不同的情况。点「当前生效坐标」卡片里的**诊断**按钮（储存失败时也会自动给出），页面会直接写明是哪一种：
+
+| 诊断结果 | 真实含义 | 该查什么 |
+|---|---|---|
+| 请求没有完成（`TypeError: Failed to fetch`） | 浏览器连 `gs-loc.apple.com` 都没连上 | 这条流量没走代理（代理工具没开、或页面开在没装模块的电脑浏览器上）；MITM 证书没在系统里完全信任；引擎应答缺少跨域头 |
+| 请求打到了 Apple 真实服务器（`HTTP 404`） | MITM 根本没拦截这个域名 | 模块脚本没下载成功（`raw.githubusercontent.com` 访问受限，最常见）；域名不在 MITM 列表；模块未启用 |
+| 模块已生效，暂无已保存坐标 | 脚本正常应答，只是还没储存过 | 一切正常，点「储存到设备」即可 |
+| 模块已生效，但这次写入失败 | 脚本拦截成功，写持久化存储失败 | 看引擎脚本日志，`wloc_settings` 写入被限制 |
+
+**最快的自证方法**：把诊断条里的检查链接复制到地址栏直接打开（同域访问不受跨域限制）。
+
+```
+https://gs-loc.apple.com/wloc-settings/save?action=query
+```
+
+- 返回 JSON（`{"success":...}`）→ 模块链路是通的，页面报错只可能是跨域头或证书问题
+- 返回 `Not Found` → 请求落在 Apple 真实服务器上，MITM 没生效，重点查模块脚本有没有下载成功（在代理工具里重新下载模块或手动导入 `dist/wloc-settings.js`）
+- 打不开 / 证书警告 → 代理没接管这条流量，或 MITM 证书没信任
+
+> 模块装在手机上，就要在手机的浏览器里打开选点页面。Mac / Windows 浏览器访问同一地址，这一跳一定失败。
+
+</details>
+
+<details>
 <summary><b>重新构建 dist（开发者）</b></summary>
 
 模块加载的 `dist/wloc.js`、`dist/wloc-settings.js` 是构建产物，源码在 `src/`：

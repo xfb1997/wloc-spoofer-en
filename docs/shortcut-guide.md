@@ -25,7 +25,7 @@
 ### 2. 打开取景页面
 在 Safari 里打开公共取景页面（建议添加到主屏幕）：
 ```
-https://你的-worker-域名/
+https://wloc.wloclocation.cc.cd/
 ```
 
 > Worker 是一个纯静态页面，不存储任何数据。坐标会直接写入你设备的本地存储。

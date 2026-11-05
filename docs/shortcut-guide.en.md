@@ -25,7 +25,7 @@ Subscribe to the module for your platform and enable MITM.
 ### 2. Open the picker page
 Open the public picker page in Safari (adding it to the Home Screen is recommended):
 ```
-https://your-worker-domain/
+https://wloc.wloclocation.cc.cd/
 ```
 
 > The Worker is a purely static page and stores no data. Coordinates are written directly to your device's local storage.

@@ -34,6 +34,13 @@ body { font-family:-apple-system,system-ui,"SF Pro","Helvetica Neue",sans-serif;
 .status { font-size:12px; color:var(--gray); margin-top:8px; text-align:center; }
 .error-banner { background:var(--red); color:#fff; padding:14px 16px; border-radius:12px; margin-bottom:12px; font-size:14px; line-height:1.5; display:none; }
 .error-banner b { display:block; margin-bottom:4px; }
+.error-banner.ok { background:var(--green); }
+.diag { background:rgba(0,0,0,.18); border-radius:8px; padding:9px 11px; margin:8px 0 10px; font-size:12.5px; line-height:1.55; }
+.diag .cause { font-weight:600; }
+.diag .hint { opacity:.92; margin-top:4px; }
+.diag .evidence { font-family:"SF Mono",monospace; font-size:11px; opacity:.85; margin-top:6px; word-break:break-all; }
+.diag a { color:#fff; text-decoration:underline; }
+.diag-close { float:right; background:rgba(0,0,0,.18); color:#fff; border:none; border-radius:6px; width:22px; height:22px; line-height:22px; font-size:15px; cursor:pointer; margin-left:8px; }
 .toast { position:fixed; top:60px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.8); color:#fff; padding:10px 20px; border-radius:20px; font-size:14px; opacity:0; transition:opacity .3s; pointer-events:none; z-index:9999; max-width:90vw; text-align:center; }
 .toast.show { opacity:1; }
 .active-loc { background:var(--bg); border-radius:8px; padding:10px 12px; font-size:13px; color:#333; }
@@ -112,6 +119,7 @@ body { font-family:-apple-system,system-ui,"SF Pro","Helvetica Neue",sans-serif;
     </div>
     <div class="row">
       <button class="btn btn-sm btn-secondary" data-i18n="refresh" onclick="queryActive()">Refresh</button>
+      <button class="btn btn-sm btn-secondary" data-i18n="diagnose" onclick="diagnoseNow()">Diagnose</button>
       <button class="btn btn-sm btn-danger" data-i18n="clear_data" onclick="clearActive()">Clear Data</button>
     </div>
   </div>
@@ -158,7 +166,27 @@ const I18N = {
   zh: {
     title: 'WLOC 虚拟定位',
     layer_satellite: '卫星', layer_amap: '高德', layer_color: '彩色', layer_standard: '标准', layer_dark: '暗色',
-    err_html: '<b>模块未生效</b>请检查以下配置：<br>1. 已安装并启用 WLOC 定位模块<br>2. MITM 已开启且信任证书<br>3. MITM 主机名包含 gs-loc.apple.com<br>4. 当前网络已走代理',
+    err_head: '模块未生效',
+    err_list: '请检查以下配置：<br>1. 已安装并启用 WLOC 定位模块<br>2. MITM 已开启且信任证书<br>3. MITM 主机名包含 gs-loc.apple.com<br>4. 当前网络已走代理',
+    err_html: function(){ return '<b>' + t('err_head') + '</b>' + t('err_list'); },
+    diagnose: '诊断',
+    diag_ok_head: '模块已生效',
+    diag_idle_head: '模块已生效，暂无已保存坐标',
+    diag_script_head: '模块已生效，但这次写入失败',
+    diag_blocked: function(n){ return '请求没有完成（' + n + '）：浏览器连不上 gs-loc.apple.com。'; },
+    diag_passthrough: function(s){ return '请求打到了 Apple 真实服务器（HTTP ' + s + '）：MITM 没有拦截这个域名。'; },
+    diag_idle: '脚本已拦截请求并正常应答，只是设备上没有已保存的坐标。',
+    diag_script: function(e){ return '脚本已拦截请求，但这次操作失败：' + e; },
+    diag_ok: '脚本已拦截请求并正常应答。',
+    hint_blocked: '多为这条流量没走代理、MITM 证书未完全信任，或引擎应答里缺少跨域头。点下面的链接在地址栏直接验证：能看到 JSON 就说明模块本身是通的，只是跨域读取被拦。',
+    hint_passthrough: '多为模块脚本没下载成功（raw.githubusercontent.com 访问受限）、域名不在 MITM 列表，或模块未启用。',
+    hint_script: '模块链路是通的，失败发生在引擎的持久化写入。',
+    hint_idle: '',
+    hint_ok: '',
+    diag_open: '在浏览器中打开检查链接',
+    ev_http: function(s, ms){ return 'HTTP ' + s + ' · ' + ms + 'ms'; },
+    ev_body: function(v){ return '响应体 ' + v; },
+    ev_err: function(v){ return '错误 ' + v; },
     choose_title: '选择目标位置',
     coords_hint: '点击地图或使用下方工具选择位置',
     save: '储存到设备', add_fav: '收藏位置', locate: '当前位置',
@@ -197,7 +225,27 @@ const I18N = {
   en: {
     title: 'WLOC Location Spoofer',
     layer_satellite: 'Satellite', layer_amap: 'Amap', layer_color: 'Color', layer_standard: 'Standard', layer_dark: 'Dark',
-    err_html: '<b>Module not active</b>Please check the following:<br>1. The WLOC location module is installed and enabled<br>2. MITM is on and the certificate is trusted<br>3. The MITM hostname list includes gs-loc.apple.com<br>4. The current network is routed through the proxy',
+    err_head: 'Module not active',
+    err_list: 'Please check the following:<br>1. The WLOC location module is installed and enabled<br>2. MITM is on and the certificate is trusted<br>3. The MITM hostname list includes gs-loc.apple.com<br>4. The current network is routed through the proxy',
+    err_html: function(){ return '<b>' + t('err_head') + '</b>' + t('err_list'); },
+    diagnose: 'Diagnose',
+    diag_ok_head: 'Module is active',
+    diag_idle_head: 'Module is active, nothing saved yet',
+    diag_script_head: 'Module is active, but this write failed',
+    diag_blocked: function(n){ return 'The request never completed (' + n + '): the browser could not reach gs-loc.apple.com.'; },
+    diag_passthrough: function(s){ return 'The request reached Apple (' + s + '): MITM did not intercept this hostname.'; },
+    diag_idle: 'The script answered the request, but no coordinates are saved on this device yet.',
+    diag_script: function(e){ return 'The script answered the request, but this operation failed: ' + e; },
+    diag_ok: 'The script intercepted the request and answered normally.',
+    hint_blocked: 'Usually this traffic is not going through the proxy, the MITM certificate is not fully trusted, or the engine reply is missing CORS headers. Open the link below in the address bar: JSON there means the module works and only the cross-origin read is blocked.',
+    hint_passthrough: 'Usually the module script failed to download (raw.githubusercontent.com is unreachable), the hostname is not in the MITM list, or the module is off.',
+    hint_script: 'The module path is fine; the failure happened while writing to engine storage.',
+    hint_idle: '',
+    hint_ok: '',
+    diag_open: 'open the check link',
+    ev_http: function(s, ms){ return 'HTTP ' + s + ' · ' + ms + 'ms'; },
+    ev_body: function(v){ return 'body ' + v; },
+    ev_err: function(v){ return 'error ' + v; },
     choose_title: 'Choose target location',
     coords_hint: 'Tap the map or use the tools below to pick a location',
     save: 'Save to Device', add_fav: 'Add Favorite', locate: 'Current Location',
@@ -261,6 +309,7 @@ function applyI18n() {
   updateStatus();
   renderActive();
   renderFavs();
+  renderBanner();
 }
 
 function setLang(l) {
@@ -326,9 +375,79 @@ function toast(msg, ms) {
   setTimeout(() => t2.classList.remove('show'), ms || 2500);
 }
 
-function showError(show) {
-  document.getElementById('errorBanner').style.display = show ? 'block' : 'none';
+/* ---- Module diagnostics ---- */
+/* 选点页面和模块之间隔着 gs-loc.apple.com 这一跳，同一个红条可能对应四种完全不同的故障，
+   所以把原始证据留住，按原因分开提示，而不是一律让用户去查那四条配置。
+   One red banner used to hide four unrelated failures, so keep the raw evidence
+   and name the cause instead of repeating the same checklist. */
+let lastDiagnosis = null;
+const DIAG_HEAD = { ok: 'diag_ok_head', idle: 'diag_idle_head', script: 'diag_script_head', blocked: 'err_head', passthrough: 'err_head' };
+
+async function callApi(query) {
+  const target = SAVE_API + query;
+  const started = Date.now();
+  try {
+    const r = await fetch(target, { method: 'GET', mode: 'cors', cache: 'no-store' });
+    const text = await r.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) {}
+    return {
+      target: target, ms: Date.now() - started, status: r.status, data: data,
+      snippet: (text || '').trim().slice(0, 80)
+    };
+  } catch (e) {
+    return { target: target, ms: Date.now() - started, error: (e && e.name) ? e.name + ': ' + (e.message || '') : String(e) };
+  }
 }
+
+/* blocked = 没走到引擎; passthrough = 走到 Apple; 其余三种都说明 MITM 已拦截。 */
+function diagnose(res) {
+  if (res.error) return { kind: 'blocked', res: res };
+  if (!res.data) return { kind: 'passthrough', res: res };
+  if (res.data.success) return { kind: 'ok', res: res };
+  if (/no saved coordinates/i.test(res.data.error || '')) return { kind: 'idle', res: res };
+  return { kind: 'script', res: res, error: res.data.error || t('write_failed') };
+}
+
+function evidence(res) {
+  if (res.error) return t('ev_err', res.error);
+  // 跨域响应头在浏览器里读不到，能读到 body 本身就已经证明跨域通过。
+  const parts = [t('ev_http', res.status, res.ms)];
+  if (!res.data && res.snippet) parts.push(t('ev_body', res.snippet));
+  return parts.join(' | ');
+}
+
+function renderBanner() {
+  const el = document.getElementById('errorBanner');
+  if (!el) return;
+  if (!lastDiagnosis) {
+    el.className = 'error-banner';
+    el.innerHTML = t('err_html');
+    el.style.display = 'none';
+    return;
+  }
+  const d = lastDiagnosis;
+  const active = d.kind === 'ok' || d.kind === 'idle';
+  // 只要脚本应答过，就不该再让用户去查那四条拦截配置。
+  const intercepted = active || d.kind === 'script';
+  const cause = d.kind === 'blocked' ? t('diag_blocked', d.res.error)
+    : d.kind === 'passthrough' ? t('diag_passthrough', d.res.status)
+    : d.kind === 'script' ? t('diag_script', d.error)
+    : t('diag_' + d.kind);
+  const hint = t('hint_' + d.kind);
+  el.className = 'error-banner' + (active ? ' ok' : '');
+  el.innerHTML = '<button class="diag-close" onclick="dismissBanner()">&times;</button>'
+    + '<b>' + t(DIAG_HEAD[d.kind]) + '</b>'
+    + '<div class="diag"><div class="cause">' + cause + '</div>'
+    + (hint ? '<div class="hint">' + hint + '</div>' : '')
+    + '<div class="evidence">' + evidence(d.res)
+    + ' · <a href="' + d.res.target + '" target="_blank" rel="noreferrer">' + t('diag_open') + '</a>'
+    + '</div></div>'
+    + (intercepted ? '' : t('err_list'));
+  el.style.display = 'block';
+}
+
+function dismissBanner() { lastDiagnosis = null; renderBanner(); }
 
 /* ---- Favorites (localStorage) ---- */
 function getFavs() {
@@ -427,41 +546,49 @@ function renderActive() {
   }
 }
 
-function queryActive() {
+function runQuery(showBanner) {
   activeStatus = 'querying';
   renderActive();
-  fetch(SAVE_API + '?action=query', { method:'GET', mode:'cors', cache:'no-store' })
-    .then(r => r.json())
-    .then(d => {
-      if (d.success && d.longitude && d.latitude) {
-        activeLon = parseFloat(d.longitude);
-        activeLat = parseFloat(d.latitude);
-        activeAcc = d.accuracy || null;
-        activeStatus = 'ok';
-      } else {
-        activeLon = null; activeLat = null; activeAcc = null;
-        activeStatus = 'none';
-      }
-      renderActive();
-      renderFavs();
-    })
-    .catch(() => { activeStatus = 'failed'; renderActive(); });
+  callApi('?action=query').then(function (res) {
+    const d = diagnose(res);
+    if (showBanner) lastDiagnosis = d;
+    if (d.kind === 'ok' && d.res.data.longitude && d.res.data.latitude) {
+      activeLon = parseFloat(d.res.data.longitude);
+      activeLat = parseFloat(d.res.data.latitude);
+      activeAcc = d.res.data.accuracy || null;
+      activeStatus = 'ok';
+    } else {
+      activeLon = null; activeLat = null; activeAcc = null;
+      activeStatus = d.kind === 'idle' ? 'none' : 'failed';
+    }
+    renderActive();
+    renderFavs();
+    renderBanner();
+  });
 }
+
+function queryActive() { runQuery(false); }
+
+function diagnoseNow() { runQuery(true); }
 
 function clearActive() {
   if (!confirm(t('clear_confirm'))) return;
-  fetch(SAVE_API + '?action=clear', { method:'GET', mode:'cors', cache:'no-store' })
-    .then(r => r.json())
-    .then(d => {
-      if (d.success) {
-        activeLon = null; activeLat = null; activeAcc = null;
-        activeStatus = 'cleared';
-        renderActive();
-        renderFavs();
-        toast(t('dev_cleared'));
-      } else { toast(t('clear_failed', d.error || ''), 3000); }
-    })
-    .catch(() => { toast(t('clear_failed_cfg'), 3000); });
+  callApi('?action=clear').then(function (res) {
+    const d = diagnose(res);
+    if (d.kind === 'ok') {
+      activeLon = null; activeLat = null; activeAcc = null;
+      activeStatus = 'cleared';
+      lastDiagnosis = null;
+      renderActive();
+      renderFavs();
+      renderBanner();
+      toast(t('dev_cleared'));
+    } else {
+      lastDiagnosis = d;
+      renderBanner();
+      toast(d.kind === 'script' ? t('clear_failed', d.error) : t('clear_failed_cfg'), 4000);
+    }
+  });
 }
 
 /* ---- Save to device ---- */
@@ -469,27 +596,22 @@ async function save() {
   if (!selected) { toast(t('pick_first')); return; }
   const btn = document.getElementById('saveBtn');
   btn.textContent = t('saving'); btn.disabled = true;
-  showError(false);
-  try {
-    const r = await fetch(SAVE_API + '?lon=' + lon + '&lat=' + lat + '&acc=25', {
-      method: 'GET', mode: 'cors', cache: 'no-store'
-    });
-    const d = await r.json();
-    if (d.success) {
-      activeLon = lon; activeLat = lat; activeAcc = 25; activeStatus = 'ok';
-      savedLon = lon; savedLat = lat; savedTimeStr = new Date().toLocaleTimeString();
-      btn.textContent = t('saved'); btn.className = 'btn btn-primary success';
-      updateStatus();
-      renderActive();
-      renderFavs();
-      toast(t('saved_toast'));
-      setTimeout(() => { btn.textContent = t('save'); btn.className='btn btn-primary'; btn.disabled=false; }, 2500);
-    } else {
-      throw new Error(d.error || t('write_failed'));
-    }
-  } catch(e) {
+  lastDiagnosis = null; renderBanner();
+  const res = await callApi('?lon=' + lon + '&lat=' + lat + '&acc=25');
+  const d = diagnose(res);
+  if (d.kind === 'ok') {
+    activeLon = lon; activeLat = lat; activeAcc = 25; activeStatus = 'ok';
+    savedLon = lon; savedLat = lat; savedTimeStr = new Date().toLocaleTimeString();
+    btn.textContent = t('saved'); btn.className = 'btn btn-primary success';
+    updateStatus();
+    renderActive();
+    renderFavs();
+    toast(t('saved_toast'));
+    setTimeout(() => { btn.textContent = t('save'); btn.className='btn btn-primary'; btn.disabled=false; }, 2500);
+  } else {
+    lastDiagnosis = d;
     btn.textContent = t('save'); btn.className = 'btn btn-primary'; btn.disabled = false;
-    showError(true);
+    renderBanner();
     toast(t('save_failed'), 4000);
   }
 }

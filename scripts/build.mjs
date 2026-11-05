@@ -7,6 +7,8 @@
  */
 import { createRequire } from "node:module";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -20,12 +22,20 @@ const targets = [
 ];
 
 function buildStamp() {
-	const now = new Date();
-	const pad = (value) => String(value).padStart(2, "0");
-	return [
-		`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-		`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
-	].join(" ");
+	// 用 src/ 源码内容的哈希当构建戳，源码不变则产物逐字节相同，重复构建不会产生 git 差异。
+	const walk = (dir) =>
+		readdirSync(dir).flatMap((name) => {
+			const full = path.join(dir, name);
+			return statSync(full).isDirectory() ? walk(full) : [full];
+		});
+	const hash = createHash("sha256");
+	walk(path.join(root, "src"))
+		.sort()
+		.forEach((file) => {
+			hash.update(path.relative(root, file).replace(/\\/g, "/"));
+			hash.update(readFileSync(file));
+		});
+	return hash.digest("hex").slice(0, 12);
 }
 
 const stamp = buildStamp();
@@ -45,5 +55,5 @@ for (const target of targets) {
 	charset: "ascii",
 		banner: { js: `/* ${basename} - Build ${stamp} */` },
 	});
-	console.log(`built ${target.out} (${stamp})`);
+	console.log(`built ${target.out} (build ${stamp})`);
 }

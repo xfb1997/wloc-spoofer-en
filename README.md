@@ -190,6 +190,7 @@ npm run check   # 构建 + 行为校验
 - `src/wloc.js` / `src/wloc-settings.js`：引擎脚本源码
 - `src/*.mjs`：自带运行时（日志、持久化存储、模块参数解析、结果封装），替代上游的 `@nsnanocat/util`，只保留本项目实际用到的部分
 - `scripts/build.mjs`：esbuild 打包，产物强制纯 ASCII，避开各代理工具读取脚本时的编码问题
+  - 产物头部的构建戳取 `src/` 源码内容哈希，源码不变则重复构建逐字节相同，不会凭空产生 `dist/` 差异
 - `scripts/verify-dist.mjs`：把新产物与仓库里已提交的产物放在同一批合成报文上对跑，并校验"参数留空即真实位置"
 
 改完 `src/` 必须重新构建并连 `dist/` 一起提交，模块的 `script-path` 指向的是 `dist/`。

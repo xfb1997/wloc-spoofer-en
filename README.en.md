@@ -190,6 +190,7 @@ npm run check   # build + behavior verification
 - `src/wloc.js` / `src/wloc-settings.js`: the engine script sources
 - `src/*.mjs`: the bundled runtime (logging, persistent storage, module argument parsing, result wrapping) that replaces the upstream `@nsnanocat/util`, keeping only what this project actually uses
 - `scripts/build.mjs`: esbuild bundling, forced to pure ASCII output to dodge encoding issues in the different proxy tools
+  - The build stamp in the artifact header is a content hash of `src/`, so rebuilding unchanged sources is byte-for-byte identical and never creates a phantom `dist/` diff
 - `scripts/verify-dist.mjs`: runs the new artifacts and the committed ones side by side over the same synthetic payloads, and checks that empty arguments mean the real location
 
 After editing `src/`, rebuild and commit `dist/` together: the module `script-path` entries point at `dist/`.

@@ -3,8 +3,8 @@
 #!author=xfb1997
 #!homepage=https://github.com/xfb1997/wloc-spoofer-en
 #!category=Tools
-#!arguments=longitude:113.94114, latitude:22.544577, accuracy:25, logLevel:info
-#!arguments-desc=longitude/latitude: default coordinates (a saved online-picker location takes priority)\naccuracy: GPS accuracy (meters)\nlogLevel: off/error/warn/info/debug/all\n\nUsage: open the picker page -> choose a location -> Save to Device
+#!arguments=longitude:, latitude:, accuracy:25, logLevel:info
+#!arguments-desc=longitude/latitude: leave both empty and the device's real network location is used, nothing is preset; a coordinate saved from the picker page always takes priority\naccuracy: GPS accuracy (meters)\nlogLevel: off/error/warn/info/debug/all\n\nUsage: open the picker page -> choose a location -> Save to Device
 
 [Script]
 Apple WLOC = type=http-response, pattern="^https?:\/\/gs-loc(-cn)?\.apple\.com\/clls\/wloc", requires-body=1, binary-body-mode=1, max-size=0, timeout=30, script-path=https://raw.githubusercontent.com/xfb1997/wloc-spoofer-en/refs/heads/main/dist/wloc.js, argument=longitude={{{longitude}}}&latitude={{{latitude}}}&accuracy={{{accuracy}}}&logLevel={{{logLevel}}}

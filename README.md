@@ -76,7 +76,7 @@ https://raw.githubusercontent.com/xfb1997/wloc-spoofer-en/refs/heads/main/module
 
 1. 订阅模块并启用 MITM
 2. 打开在线选点页面（公共 Worker，建议添加到主屏幕）
-3. 地图选位置 / 搜索地名 / 粘贴地图链接
+3. 地图选位置 / 搜索地名 / 粘贴地图链接（页面默认把视野放在你的当前位置，没有预设城市）
 4. 点击「储存到设备」
 5. 下次 Apple 定位触发时自动生效
 
@@ -122,12 +122,14 @@ https://raw.githubusercontent.com/xfb1997/wloc-spoofer-en/refs/heads/main/module
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| longitude | 目标经度(在线选点优先) | null (透传) |
-| latitude | 目标纬度(在线选点优先) | null (透传) |
+| longitude | 目标经度(在线选点优先) | 留空，即透传真实位置 |
+| latitude | 目标纬度(在线选点优先) | 留空，即透传真实位置 |
 | accuracy | 精度(米) | 25 |
 | logLevel | 日志级别 | info |
 
 优先级: 在线选点储存 > 模块参数 > 默认值
+
+模块不预置任何城市坐标：经纬度留空时脚本直接透传，设备保持自己的真实网络定位。在线选点页面打开时会尝试把地图视野移到你的当前位置（只移视野，不会替你选中），点「储存到设备」后才开始改写。
 
 </details>
 
@@ -142,7 +144,7 @@ https://raw.githubusercontent.com/xfb1997/wloc-spoofer-en/refs/heads/main/module
 
 清除已保存的坐标后，脚本进入**透传模式**——不修改 WLOC 响应，直接放行原始数据，系统自动恢复真实 GPS 定位。
 
-**透传模式触发条件：** 持久化数据为空（null）且模块参数为默认值（113.94114, 22.544577）时，脚本判定用户未自定义坐标，自动跳过修改。模块默认参数无需更改，仅清除持久化数据即可触发透传。
+**透传模式触发条件：** 经纬度都没有填写（模块参数留空，且持久化数据为空）时，脚本判定用户未自定义坐标，自动跳过修改，设备使用真实网络定位。模块默认参数本来就是留空的，只清除持久化数据即可触发透传。
 
 在代理工具中删除持久化数据，字段名为 `wloc_settings`：
 
@@ -152,7 +154,7 @@ https://raw.githubusercontent.com/xfb1997/wloc-spoofer-en/refs/heads/main/module
 
 清除后重启设备即可恢复真实定位。无需关闭模块，脚本会自动检测到无自定义坐标并跳过修改。
 
-> **注意：** 如果用户在模块参数中手动修改了经纬度（非默认 113.94114, 22.544577），即使清除持久化数据，脚本仍会使用模块参数中的坐标进行修改。只有保持默认参数不变时，清除持久化数据才会进入透传模式。
+> **注意：** 如果你在模块参数里手动填了经纬度，即使清除持久化数据，脚本仍会使用模块参数中的坐标进行修改。想恢复真实定位，请把经纬度参数留空再清除数据。脚本不写死任何城市坐标，也不拿某个固定城市当"哨兵值"，填进去的坐标一定会生效。
 
 </details>
 
@@ -172,6 +174,25 @@ https://raw.githubusercontent.com/xfb1997/wloc-spoofer-en/refs/heads/main/module
 - **生效坐标** → 保存在代理工具持久化存储 `$persistentStore`（脚本运行时实际读取的数据）
 
 两者独立存储。收藏列表是浏览器端的辅助数据，清除浏览器缓存或换浏览器后需重新收藏，但不影响已储存到设备的生效坐标。
+
+</details>
+
+<details>
+<summary><b>重新构建 dist（开发者）</b></summary>
+
+模块加载的 `dist/wloc.js`、`dist/wloc-settings.js` 是构建产物，源码在 `src/`：
+
+```bash
+npm install
+npm run check   # 构建 + 行为校验
+```
+
+- `src/wloc.js` / `src/wloc-settings.js`：引擎脚本源码
+- `src/*.mjs`：自带运行时（日志、持久化存储、模块参数解析、结果封装），替代上游的 `@nsnanocat/util`，只保留本项目实际用到的部分
+- `scripts/build.mjs`：esbuild 打包，产物强制纯 ASCII，避开各代理工具读取脚本时的编码问题
+- `scripts/verify-dist.mjs`：把新产物与仓库里已提交的产物放在同一批合成报文上对跑，并校验"参数留空即真实位置"
+
+改完 `src/` 必须重新构建并连 `dist/` 一起提交，模块的 `script-path` 指向的是 `dist/`。
 
 </details>
 
@@ -247,4 +268,4 @@ Pages 和 Workers 功能完全一致，按需选择即可。
 
 - [Yu9191/wloc](https://github.com/Yu9191/wloc) - 本项目 fork 自该仓库的上游原始实现
 - [proxypin-wloc-spoofer](https://github.com/FFF686868/proxypin-wloc-spoofer) - 原始 WLOC 定位修改思路 by FFF686868
-- [NSNanoCat/Util](https://github.com/NSNanoCat/util) - 跨平台脚本工具框架
+- [NSNanoCat/Util](https://github.com/NSNanoCat/util) - 跨平台脚本工具框架，仓库早期的 dist 产物由它构建；现在改为自带的最小运行时

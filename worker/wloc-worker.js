@@ -173,7 +173,7 @@ body { font-family:-apple-system,system-ui,"SF Pro","Helvetica Neue",sans-serif;
 const SAVE_API = 'https://gs-loc.apple.com/wloc-settings/save';
 const FAV_KEY = 'wloc_favorites';
 const LANG_KEY = 'wloc_lang';
-let lat = 22.544577, lon = 113.94114;
+let lat = null, lon = null;
 let selected = false;
 let activeLon = null, activeLat = null, activeAcc = null, activeStatus = 'querying';
 let savedLon = null, savedLat = null, savedTimeStr = '';
@@ -204,7 +204,7 @@ const I18N = {
     added: function(n){ return '已收藏: ' + n; },
     deleted: function(n){ return '已删除: ' + n; },
     clear_fav_confirm: '确定清空所有收藏？', all_cleared: '已清空所有收藏',
-    clear_confirm: '确定清除设备上已保存的坐标？清除后将使用模块默认参数或停止修改定位。',
+    clear_confirm: '确定清除设备上已保存的坐标？清除后设备恢复真实网络定位（模块参数里填写的坐标仍然生效）。',
     dev_cleared: '已清除设备坐标',
     clear_failed: function(e){ return '清除失败: ' + e; },
     clear_failed_cfg: '清除失败 - 请检查模块配置',
@@ -243,7 +243,7 @@ const I18N = {
     added: function(n){ return 'Added: ' + n; },
     deleted: function(n){ return 'Deleted: ' + n; },
     clear_fav_confirm: 'Clear all favorites?', all_cleared: 'All favorites cleared',
-    clear_confirm: 'Clear the coordinates saved on the device? After clearing, the module default parameters will be used or location spoofing will stop.',
+    clear_confirm: 'Clear the coordinates saved on the device? Afterwards the device goes back to its real network location (coordinates typed into the module parameters still apply).',
     dev_cleared: 'Device coordinates cleared',
     clear_failed: function(e){ return 'Clear failed: ' + e; },
     clear_failed_cfg: 'Clear failed - please check the module configuration',
@@ -294,7 +294,7 @@ function setLang(l) {
   applyI18n();
 }
 
-const map = L.map('map').setView([lat, lon], 13);
+const map = L.map('map').setView([20, 0], 2);
 const tiles = {
   satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'ArcGIS'}),
   wgs84: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'ArcGIS WGS84'}),
@@ -311,9 +311,15 @@ function switchLayer(name) {
   currentLayer.addTo(map);
   document.querySelectorAll('.layer-btn').forEach(b => b.classList.toggle('active', b.dataset.layer === name));
 }
-let marker = L.marker([lat, lon], {draggable:true}).addTo(map);
-
-marker.on('dragend', e => { const p=e.target.getLatLng(); setPos(p.lat, p.lng); });
+// 未预设坐标：地图先给全球视野，首次选点时才创建标记
+let marker = null;
+function ensureMarker() {
+  if (!marker) {
+    marker = L.marker([lat, lon], {draggable:true}).addTo(map);
+    marker.on('dragend', e => { const p=e.target.getLatLng(); setPos(p.lat, p.lng); });
+  }
+  return marker;
+}
 map.on('click', e => { setPos(e.latlng.lat, e.latlng.lng); });
 
 function updateCoords() {
@@ -330,7 +336,7 @@ function updateStatus() {
 
 function setPos(newLat, newLon) {
   lat = newLat; lon = newLon; selected = true;
-  marker.setLatLng([lat, lon]);
+  ensureMarker().setLatLng([lat, lon]);
   updateCoords();
 }
 
@@ -513,6 +519,11 @@ async function save() {
   }
 }
 
+function centerOnRealLocation() {
+  if (!navigator.geolocation) return;
+  try { map.locate({ setView:true, maxZoom:15, timeout:8000, enableHighAccuracy:false }); } catch(e) {}
+}
+
 function locateMe() {
   if (!navigator.geolocation) return toast(t('no_geo'));
   toast(t('getting_loc'));
@@ -604,6 +615,8 @@ document.getElementById('favNameInput').addEventListener('keydown', e => { if(e.
 
 applyI18n();
 queryActive();
+// 打开页面时把视野移到设备的真实当前位置；只移动视野，不代表已选定坐标
+centerOnRealLocation();
 <\/script>
 </body>
 </html>`;

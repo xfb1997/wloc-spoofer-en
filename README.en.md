@@ -76,7 +76,7 @@ To make Apple Maps and Amap go through the same flow, links are sent to `wloc.wl
 
 1. Subscribe to the module and enable MITM
 2. Open the online picker page (public Worker; adding it to the Home Screen is recommended)
-3. Pick a location on the map / search a place name / paste a map link
+3. Pick a location on the map / search a place name / paste a map link (the page opens centered on your current location, nothing is preset)
 4. Tap "Save to Device"
 5. It takes effect automatically the next time Apple location is triggered
 
@@ -122,12 +122,14 @@ The module contains two rules:
 
 | Parameter | Description | Default |
 |------|------|--------|
-| longitude | Target longitude (online picker takes priority) | null (passthrough) |
-| latitude | Target latitude (online picker takes priority) | null (passthrough) |
+| longitude | Target longitude (online picker takes priority) | empty, i.e. passthrough the real location |
+| latitude | Target latitude (online picker takes priority) | empty, i.e. passthrough the real location |
 | accuracy | Accuracy (meters) | 25 |
 | logLevel | Log level | info |
 
 Priority: online picker save > module parameters > default value
+
+The modules ship no preset city: while longitude/latitude stay empty the script passes the response through and the device keeps its own real network location. The picker page tries to move the map view onto your current position when it opens (view only, it never picks for you); rewriting starts once you tap "Save to Device".
 
 </details>
 
@@ -142,7 +144,7 @@ Once the module is off, the script no longer intercepts WLOC requests and the sy
 
 After clearing the saved coordinates, the script enters **passthrough mode** — it does not modify the WLOC response and lets the original data through, so the system restores the real GPS location automatically.
 
-**Passthrough mode trigger condition:** when the persisted data is empty (null) and the module parameters are the defaults (113.94114, 22.544577), the script decides the user has not set custom coordinates and skips modification automatically. There is no need to change the module's default parameters; simply clearing the persisted data triggers passthrough.
+**Passthrough mode trigger condition:** when no longitude/latitude is set (the module arguments are empty and the persisted data is empty), the script decides that you have not chosen custom coordinates and skips the modification, so the device keeps using its real network location. The module arguments ship empty, so clearing the persisted data alone is enough to enter passthrough mode.
 
 Delete the persisted data in your proxy tool; the field name is `wloc_settings`:
 
@@ -152,7 +154,7 @@ Delete the persisted data in your proxy tool; the field name is `wloc_settings`:
 
 After clearing, restart the device to restore the real location. There is no need to turn off the module; the script automatically detects that there are no custom coordinates and skips modification.
 
-> **Note:** if the user manually changed the longitude/latitude in the module parameters (i.e. not the default 113.94114, 22.544577), the script will still use the coordinates from the module parameters even after clearing the persisted data. Only when the default parameters are kept unchanged does clearing the persisted data enter passthrough mode.
+> **Note:** if you type longitude/latitude into the module parameters, the script keeps using those coordinates even after clearing the persisted data. To go back to the real location, empty the coordinate parameters first, then clear the data. Nothing is hardcoded and no fixed city acts as a sentinel value, so any coordinate you enter always takes effect.
 
 </details>
 
@@ -172,6 +174,25 @@ The online picker page supports saving multiple locations as favorites, making i
 - **Active coordinates** → stored in the proxy tool's persistent storage `$persistentStore` (the data the script actually reads at runtime)
 
 The two are stored independently. The favorites list is browser-side helper data; clearing the browser cache or switching browsers means you'll need to re-add favorites, but it does not affect the active coordinates already saved to the device.
+
+</details>
+
+<details>
+<summary><b>Rebuilding dist (for developers)</b></summary>
+
+The `dist/wloc.js` and `dist/wloc-settings.js` files that the modules load are build artifacts; the source lives in `src/`:
+
+```bash
+npm install
+npm run check   # build + behavior verification
+```
+
+- `src/wloc.js` / `src/wloc-settings.js`: the engine script sources
+- `src/*.mjs`: the bundled runtime (logging, persistent storage, module argument parsing, result wrapping) that replaces the upstream `@nsnanocat/util`, keeping only what this project actually uses
+- `scripts/build.mjs`: esbuild bundling, forced to pure ASCII output to dodge encoding issues in the different proxy tools
+- `scripts/verify-dist.mjs`: runs the new artifacts and the committed ones side by side over the same synthetic payloads, and checks that empty arguments mean the real location
+
+After editing `src/`, rebuild and commit `dist/` together: the module `script-path` entries point at `dist/`.
 
 </details>
 
@@ -247,4 +268,4 @@ Pages and Workers are functionally identical; choose whichever you prefer.
 
 - [Yu9191/wloc](https://github.com/Yu9191/wloc) - this project is forked from the original upstream implementation
 - [proxypin-wloc-spoofer](https://github.com/FFF686868/proxypin-wloc-spoofer) - the original WLOC location modification idea by FFF686868
-- [NSNanoCat/Util](https://github.com/NSNanoCat/util) - cross-platform scripting utility framework
+- [NSNanoCat/Util](https://github.com/NSNanoCat/util) - cross-platform scripting utility framework; the committed dist artifacts were originally built with it, now replaced by the minimal bundled runtime in this repo

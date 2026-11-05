@@ -16,6 +16,9 @@ export default {
 		if (request.method === "OPTIONS") {
 			return new Response(null, { headers: { "Access-Control-Allow-Origin": "*" } });
 		}
+		if (url.pathname === "/api/parse") {
+			return await handleParse(url);
+		}
 		return servePage(url);
 	},
 };
@@ -521,32 +524,57 @@ function locateMe() {
 }
 
 function parseMapUrl(text) {
-  let m;
-  m = text.match(/ll=([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
-  m = text.match(/@([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
-  m = text.match(/lnglat=([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[2]), lon: parseFloat(m[1]) };
-  m = text.match(/(?:location|center)=([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[2]), lon: parseFloat(m[1]) };
-  m = text.match(/([0-9]+\\.[0-9]+)[,\\s]+([0-9]+\\.[0-9]+)/);
-  if (m) {
-    const a = parseFloat(m[1]), b = parseFloat(m[2]);
-    if (a < 90 && b > 90) return { lat: a, lon: b };
-    if (b < 90 && a > 90) return { lat: b, lon: a };
+  // Normalise a candidate pair, repairing an obvious lon/lat swap and
+  // rejecting anything out of range so a bad link fails loudly.
+  function npair(a, b) {
+    a = parseFloat(a); b = parseFloat(b);
+    if (!isFinite(a) || !isFinite(b)) return null;
+    if (Math.abs(a) > 90 && Math.abs(b) <= 90) { const t = a; a = b; b = t; }
+    if (Math.abs(a) > 90 || Math.abs(b) > 180) return null;
     return { lat: a, lon: b };
   }
+  let m, r;
+  m = text.match(/position=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[2], m[1]))) return r;
+  m = text.match(/(?:coordinate|sll|ll)=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[1], m[2]))) return r;
+  m = text.match(/@([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[1], m[2]))) return r;
+  m = text.match(/lnglat=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[2], m[1]))) return r;
+  m = text.match(/(?:location|center)=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[2], m[1]))) return r;
+  const lonM = text.match(/(?:longitude|lng|lon)"?[=:]("?-?[0-9.]+)/);
+  const latM = text.match(/(?:latitude|lat)"?[=:]("?-?[0-9.]+)/);
+  if (lonM && latM && (r = npair(latM[1], lonM[1]))) return r;
+  m = text.match(/([0-9]{1,3}[.][0-9]+)[, ]+(-?[0-9]{1,3}[.][0-9]+)/);
+  if (m && (r = npair(m[1], m[2]))) return r;
   return null;
 }
 
-function parseUrl() {
+async function parseUrl() {
   const input = document.getElementById('urlInput').value.trim();
   if (!input) return toast(t('paste_first'));
-  const result = parseMapUrl(input);
+  let result = null;
+  let name = '';
+  if (input.indexOf('http') >= 0) {
+    // Server-side parse: follows Amap short links and converts GCJ-02 -> WGS84.
+    // Falls back to the local parser when /api/parse is absent (static-only deploy).
+    try {
+      const r = await fetch('/api/parse?format=json&u=' + encodeURIComponent(input));
+      if (r.ok) {
+        const j = await r.json();
+        if (j && isFinite(j.lat) && isFinite(j.lon) && Math.abs(j.lat) <= 90) {
+          result = { lat: Number(j.lat), lon: Number(j.lon) };
+          name = j.name || '';
+        }
+      }
+    } catch (e) {}
+  }
+  if (!result) result = parseMapUrl(input);
   if (!result) { toast(t('parse_failed'), 3000); return; }
   moveTo(result.lat, result.lon, 15);
-  toast(t('parsed', result.lon, result.lat));
+  toast(name ? name.slice(0, 40) : t('parsed', result.lon, result.lat));
 }
 
 async function searchPlace() {
@@ -583,4 +611,210 @@ queryActive();
 	return new Response(html, {
 		headers: { "Content-Type": "text/html;charset=utf-8", "Cache-Control": "no-cache" },
 	});
+}
+
+// Same contract as worker/src/index.js /api/parse. Derived from worker/src/parse.js;
+// regenerate this tail when that module changes so the two stay equivalent.
+async function handleParse(url) {
+	const raw = url.searchParams.get("u") || "";
+	const cs = (url.searchParams.get("cs") || "").toLowerCase();
+	const fmt = (url.searchParams.get("format") || "").toLowerCase();
+	const headers = { "Access-Control-Allow-Origin": "*" };
+	try {
+		let { lat, lon, name, src } = await parseCoords(raw);
+		const needConv = cs === "gcj" || (cs !== "none" && (src === "amap" || src === "apple"));
+		if (needConv) ({ lat, lon } = gcj02ToWgs84(lat, lon));
+		lat = round6(lat);
+		lon = round6(lon);
+		if (fmt === "json") {
+			headers["Content-Type"] = "application/json";
+			return new Response(JSON.stringify({ lat, lon, name: name || "" }), { headers });
+		}
+		headers["Content-Type"] = "text/plain;charset=utf-8";
+		return new Response("lat=" + lat + "&lon=" + lon, { headers });
+	} catch (e) {
+		headers["Content-Type"] = "application/json";
+		return new Response(JSON.stringify({ error: String(e && e.message ? e.message : e) }), { status: 422, headers });
+	}
+}
+
+// Amap uses GCJ-02; Apple Maps is also GCJ-02 in mainland China. Both are converted to WGS84 before being fed to wloc;
+// gcj02ToWgs84 has a built-in out_of_china check and returns coordinates outside China unchanged (no-op).
+
+function safeDecode(s) {
+  if (!s) return "";
+  try {
+    return decodeURIComponent(String(s).replace(/\+/g, " "));
+  } catch (e) {
+    return String(s);
+  }
+}
+
+// Amap / AutoNavi hosts: their links carry GCJ-02 coordinates.
+const AMAP_HOST = /amap\.com|amapuri|autonavi/i;
+
+function nameFrom(str) {
+  const nm = str.match(/[?&]name=([^&#]+)/i) || str.match(/["']name["']\s*:\s*["']([^"']+)["']/i);
+  return nm ? safeDecode(nm[1]) : "";
+}
+
+// Normalise a candidate pair into {lat, lon, name, src}.
+// Amap emits lon,lat where the rest of the pipeline expects lat,lon, so repair an
+// obvious swap, then reject anything still out of range. A bad link must fail loudly
+// rather than persist garbage coordinates to the device.
+function latLon(lat, lon, src, name) {
+  let la = Number(lat);
+  let lo = Number(lon);
+  if (!isFinite(la) || !isFinite(lo)) return null;
+  if (Math.abs(la) > 90 && Math.abs(lo) <= 90) { const t = la; la = lo; lo = t; }
+  if (Math.abs(la) > 90 || Math.abs(lo) > 180) return null;
+  return { lat: la, lon: lo, name: name || "", src };
+}
+
+// Extract longitude, latitude and name from a string. Handles:
+//  Apple Maps coordinate=/ll=/sll=lat,lon  (name in name=...)
+//  Amap position=<lon>,<lat>               (uri.amap.com/marker; longitude first)
+//  Amap markers=[{"longitude":..,"latitude":..,"name":".."}]
+//  Named lng/lon/longitude + lat/latitude pairs, query string or JSON, either order
+//  Amap ?p=POIID,lat,lon,name  (comma or %2C)
+//  Amap ?q=lat,lon,name        (newer share links, comma or %2C)
+//  Plain text lat,lon
+function extractFromString(s) {
+  if (!s) return null;
+  const str = String(s);
+  const amap = AMAP_HOST.test(str);
+  let m, hit;
+
+  m = str.match(/(?:coordinate|ll|sll)=(-?\d{1,3}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/i);
+  if (m && (hit = latLon(m[1], m[2], amap ? "amap" : "apple", nameFrom(str)))) return hit;
+
+  m = str.match(/[?&]position=(-?\d{1,3}(?:\.\d+)?)(?:,|%2C)(-?\d{1,3}(?:\.\d+)?)/i);
+  if (m && (hit = latLon(m[2], m[1], "amap", nameFrom(str)))) return hit;
+
+  const lonM = str.match(/["']?(?:longitude|lng|lon)["']?\s*[:=]\s*["']?(-?\d{1,3}\.\d+)/i);
+  const latM = str.match(/["']?(?:latitude|lat)["']?\s*[:=]\s*["']?(-?\d{1,3}\.\d+)/i);
+  if (lonM && latM && (hit = latLon(latM[1], lonM[1], amap ? "amap" : "text", nameFrom(str)))) return hit;
+
+  m = str.match(
+    /[?&]p=[^,&%]*(?:,|%2C)(-?\d{1,3}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)(?:(?:,|%2C)((?:(?!,|%2C|&).)+))?/i
+  );
+  if (m && (hit = latLon(m[1], m[2], "amap", m[3] ? safeDecode(m[3]) : ""))) return hit;
+
+  m = str.match(
+    /[?&]q=(-?\d{1,3}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)(?:(?:,|%2C)((?:(?!,|%2C|&).)+))?/i
+  );
+  if (m && (hit = latLon(m[1], m[2], "amap", m[3] ? safeDecode(m[3]) : ""))) return hit;
+
+  m = str.match(/(-?\d{1,3}\.\d{4,})\s*(?:,|%2C)\s*(-?\d{1,3}\.\d{4,})/);
+  if (m && (hit = latLon(m[1], m[2], amap ? "amap" : "text", ""))) return hit;
+  return null;
+}
+
+// Accepts raw text (which may contain a place name plus a link), extracts the URL, follows redirects to expand short links when needed, and extracts the coordinates.
+async function parseCoords(raw) {
+  const text = String(raw || "").trim();
+  if (!text) throw new Error("Empty input");
+
+  const urlMatch = text.match(/https?:\/\/[^\s'"<>]+/i);
+  let target = urlMatch ? urlMatch[0] : text;
+
+  let hit = extractFromString(target);
+  if (hit) return hit;
+
+  if (urlMatch) {
+    let cur = target;
+    for (let i = 0; i < 5; i++) {
+      let resp;
+      try {
+        resp = await fetch(cur, {
+          redirect: "manual",
+          headers: {
+            "user-agent":
+              "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/24A5370h Safari/604.1",
+            accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "accept-language": "zh-CN,zh-Hans;q=0.9",
+          },
+        });
+      } catch (e) {
+        break;
+      }
+      const loc = resp.headers.get("location");
+      if (loc) {
+        hit = extractFromString(loc);
+        if (hit) return hit;
+        cur = new URL(loc, cur).toString();
+        hit = extractFromString(cur);
+        if (hit) return hit;
+        continue;
+      }
+      hit = extractFromString(resp.url);
+      if (hit) return hit;
+      try {
+        const body = await resp.text();
+        hit = extractFromString(body);
+        if (hit) return hit;
+      } catch (e) {}
+      break;
+    }
+  }
+  throw new Error("Could not parse coordinates from the link");
+}
+
+function round6(n) {
+  return Math.round(Number(n) * 1e6) / 1e6;
+}
+
+const GCJ_A = 6378245.0;
+const GCJ_EE = 0.00669342162296594323;
+
+function gcjOutOfChina(lng, la) {
+  return lng < 72.004 || lng > 137.8347 || la < 0.8293 || la > 55.8271;
+}
+
+function gcjDeltaLat(x, y) {
+  let r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+  r += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  r += ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0;
+  r += ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0;
+  return r;
+}
+
+function gcjDeltaLon(x, y) {
+  let r = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+  r += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  r += ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0;
+  r += ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0;
+  return r;
+}
+
+// WGS84 -> GCJ-02 (forward offset), matching the offset used by Amap / Apple in China.
+function wgs84ToGcj02(lat, lon) {
+  if (gcjOutOfChina(lon, lat)) return { lat, lon };
+  let dLat = gcjDeltaLat(lon - 105.0, lat - 35.0);
+  let dLon = gcjDeltaLon(lon - 105.0, lat - 35.0);
+  const radLat = (lat / 180.0) * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - GCJ_EE * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  dLat = (dLat * 180.0) / (((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic)) * Math.PI);
+  dLon = (dLon * 180.0) / ((GCJ_A / sqrtMagic) * Math.cos(radLat) * Math.PI);
+  return { lat: lat + dLat, lon: lon + dLon };
+}
+
+// GCJ-02 -> WGS84 (iterative inverse, sub-meter accuracy).
+// A single-pass inverse leaves a 1~2m residual in areas with a steep offset gradient; here a fixed-point
+// iteration converges to <0.1m, aligning strictly with Amap's own WGS84->GCJ inverse and removing round-trip residuals.
+function gcj02ToWgs84(lat, lon) {
+  if (gcjOutOfChina(lon, lat)) return { lat, lon };
+  let wgsLat = lat;
+  let wgsLon = lon;
+  for (let i = 0; i < 6; i++) {
+    const g = wgs84ToGcj02(wgsLat, wgsLon);
+    const errLat = g.lat - lat;
+    const errLon = g.lon - lon;
+    if (Math.abs(errLat) < 1e-9 && Math.abs(errLon) < 1e-9) break;
+    wgsLat -= errLat;
+    wgsLon -= errLon;
+  }
+  return { lat: wgsLat, lon: wgsLon };
 }

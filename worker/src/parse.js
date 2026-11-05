@@ -11,30 +11,63 @@ export function safeDecode(s) {
   }
 }
 
+// Amap / AutoNavi hosts: their links carry GCJ-02 coordinates.
+const AMAP_HOST = /amap\.com|amapuri|autonavi/i;
+
+function nameFrom(str) {
+  const nm = str.match(/[?&]name=([^&#]+)/i) || str.match(/["']name["']\s*:\s*["']([^"']+)["']/i);
+  return nm ? safeDecode(nm[1]) : "";
+}
+
+// Normalise a candidate pair into {lat, lon, name, src}.
+// Amap emits lon,lat where the rest of the pipeline expects lat,lon, so repair an
+// obvious swap, then reject anything still out of range. A bad link must fail loudly
+// rather than persist garbage coordinates to the device.
+function latLon(lat, lon, src, name) {
+  let la = Number(lat);
+  let lo = Number(lon);
+  if (!isFinite(la) || !isFinite(lo)) return null;
+  if (Math.abs(la) > 90 && Math.abs(lo) <= 90) { const t = la; la = lo; lo = t; }
+  if (Math.abs(la) > 90 || Math.abs(lo) > 180) return null;
+  return { lat: la, lon: lo, name: name || "", src };
+}
+
 // Extract longitude, latitude and name from a string. Handles:
 //  Apple Maps coordinate=/ll=/sll=lat,lon  (name in name=...)
-//  Amap ?p=POIID,lat,lon,name,city  (comma or %2C)
-//  Amap ?q=lat,lon,name             (newer share links, comma or %2C)
+//  Amap position=<lon>,<lat>               (uri.amap.com/marker; longitude first)
+//  Amap markers=[{"longitude":..,"latitude":..,"name":".."}]
+//  Named lng/lon/longitude + lat/latitude pairs, query string or JSON, either order
+//  Amap ?p=POIID,lat,lon,name  (comma or %2C)
+//  Amap ?q=lat,lon,name        (newer share links, comma or %2C)
 //  Plain text lat,lon
 export function extractFromString(s) {
   if (!s) return null;
   const str = String(s);
-  let m;
+  const amap = AMAP_HOST.test(str);
+  let m, hit;
+
   m = str.match(/(?:coordinate|ll|sll)=(-?\d{1,3}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/i);
-  if (m) {
-    const nm = str.match(/[?&]name=([^&]+)/i);
-    return { lat: +m[1], lon: +m[2], name: nm ? safeDecode(nm[1]) : "", src: "apple" };
-  }
+  if (m && (hit = latLon(m[1], m[2], amap ? "amap" : "apple", nameFrom(str)))) return hit;
+
+  m = str.match(/[?&]position=(-?\d{1,3}(?:\.\d+)?)(?:,|%2C)(-?\d{1,3}(?:\.\d+)?)/i);
+  if (m && (hit = latLon(m[2], m[1], "amap", nameFrom(str)))) return hit;
+
+  const lonM = str.match(/["']?(?:longitude|lng|lon)["']?\s*[:=]\s*["']?(-?\d{1,3}\.\d+)/i);
+  const latM = str.match(/["']?(?:latitude|lat)["']?\s*[:=]\s*["']?(-?\d{1,3}\.\d+)/i);
+  if (lonM && latM && (hit = latLon(latM[1], lonM[1], amap ? "amap" : "text", nameFrom(str)))) return hit;
+
   m = str.match(
     /[?&]p=[^,&%]*(?:,|%2C)(-?\d{1,3}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)(?:(?:,|%2C)((?:(?!,|%2C|&).)+))?/i
   );
-  if (m) return { lat: +m[1], lon: +m[2], name: m[3] ? safeDecode(m[3]) : "", src: "amap" };
+  if (m && (hit = latLon(m[1], m[2], "amap", m[3] ? safeDecode(m[3]) : ""))) return hit;
+
   m = str.match(
     /[?&]q=(-?\d{1,3}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)(?:(?:,|%2C)((?:(?!,|%2C|&).)+))?/i
   );
-  if (m) return { lat: +m[1], lon: +m[2], name: m[3] ? safeDecode(m[3]) : "", src: "amap" };
+  if (m && (hit = latLon(m[1], m[2], "amap", m[3] ? safeDecode(m[3]) : ""))) return hit;
+
   m = str.match(/(-?\d{1,3}\.\d{4,})\s*(?:,|%2C)\s*(-?\d{1,3}\.\d{4,})/);
-  if (m) return { lat: +m[1], lon: +m[2], name: "", src: "text" };
+  if (m && (hit = latLon(m[1], m[2], amap ? "amap" : "text", ""))) return hit;
   return null;
 }
 

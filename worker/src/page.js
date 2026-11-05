@@ -499,32 +499,57 @@ function locateMe() {
 }
 
 function parseMapUrl(text) {
-  let m;
-  m = text.match(/ll=([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
-  m = text.match(/@([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
-  m = text.match(/lnglat=([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[2]), lon: parseFloat(m[1]) };
-  m = text.match(/(?:location|center)=([0-9.-]+),([0-9.-]+)/);
-  if (m) return { lat: parseFloat(m[2]), lon: parseFloat(m[1]) };
-  m = text.match(/([0-9]+\\.[0-9]+)[,\\s]+([0-9]+\\.[0-9]+)/);
-  if (m) {
-    const a = parseFloat(m[1]), b = parseFloat(m[2]);
-    if (a < 90 && b > 90) return { lat: a, lon: b };
-    if (b < 90 && a > 90) return { lat: b, lon: a };
+  // Normalise a candidate pair, repairing an obvious lon/lat swap and
+  // rejecting anything out of range so a bad link fails loudly.
+  function npair(a, b) {
+    a = parseFloat(a); b = parseFloat(b);
+    if (!isFinite(a) || !isFinite(b)) return null;
+    if (Math.abs(a) > 90 && Math.abs(b) <= 90) { const t = a; a = b; b = t; }
+    if (Math.abs(a) > 90 || Math.abs(b) > 180) return null;
     return { lat: a, lon: b };
   }
+  let m, r;
+  m = text.match(/position=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[2], m[1]))) return r;
+  m = text.match(/(?:coordinate|sll|ll)=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[1], m[2]))) return r;
+  m = text.match(/@([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[1], m[2]))) return r;
+  m = text.match(/lnglat=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[2], m[1]))) return r;
+  m = text.match(/(?:location|center)=([0-9.-]+),([0-9.-]+)/);
+  if (m && (r = npair(m[2], m[1]))) return r;
+  const lonM = text.match(/(?:longitude|lng|lon)"?[=:]("?-?[0-9.]+)/);
+  const latM = text.match(/(?:latitude|lat)"?[=:]("?-?[0-9.]+)/);
+  if (lonM && latM && (r = npair(latM[1], lonM[1]))) return r;
+  m = text.match(/([0-9]{1,3}[.][0-9]+)[, ]+(-?[0-9]{1,3}[.][0-9]+)/);
+  if (m && (r = npair(m[1], m[2]))) return r;
   return null;
 }
 
-function parseUrl() {
+async function parseUrl() {
   const input = document.getElementById('urlInput').value.trim();
   if (!input) return toast(t('paste_first'));
-  const result = parseMapUrl(input);
+  let result = null;
+  let name = '';
+  if (input.indexOf('http') >= 0) {
+    // Server-side parse: follows Amap short links and converts GCJ-02 -> WGS84.
+    // Falls back to the local parser when /api/parse is absent (static-only deploy).
+    try {
+      const r = await fetch('/api/parse?format=json&u=' + encodeURIComponent(input));
+      if (r.ok) {
+        const j = await r.json();
+        if (j && isFinite(j.lat) && isFinite(j.lon) && Math.abs(j.lat) <= 90) {
+          result = { lat: Number(j.lat), lon: Number(j.lon) };
+          name = j.name || '';
+        }
+      }
+    } catch (e) {}
+  }
+  if (!result) result = parseMapUrl(input);
   if (!result) { toast(t('parse_failed'), 3000); return; }
   moveTo(result.lat, result.lon, 15);
-  toast(t('parsed', result.lon, result.lat));
+  toast(name ? name.slice(0, 40) : t('parsed', result.lon, result.lat));
 }
 
 async function searchPlace() {

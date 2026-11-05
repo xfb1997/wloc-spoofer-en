@@ -1,0 +1,16 @@
+{
+  "name": "wloc-spoofer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Apple WLOC 网络定位改写：引擎脚本源码与构建工具链 (dist/ 由 src/ 构建)",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "verify": "node scripts/verify-dist.mjs",
+    "check": "node scripts/build.mjs && node scripts/verify-dist.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.14.54",
+    "pako": "2.1.0"
+  }
+}
